@@ -12,10 +12,12 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tracking.dao.ClaimEntity;
+import com.tracking.dao.RewardPoints;
 import com.tracking.dao.TrackerEntity;
 import com.tracking.dao.TrackingSummary;
 import com.tracking.dao.UserEntity;
 import com.tracking.dao.repo.ClaimRepository;
+import com.tracking.dao.repo.RewardPointsRepo;
 import com.tracking.dao.repo.TrackerRepository;
 import com.tracking.dao.repo.TrackingSummaryRepository;
 import com.tracking.dao.repo.UserRepository;
@@ -39,6 +41,9 @@ public class TrackerService {
 	
 	@Autowired
 	TrackingSummaryRepository summaryRepo;
+	
+	@Autowired
+	RewardPointsRepo rwrdRepo;
 
 	@Autowired
 	private BCryptPasswordEncoder bCryptPasswordEncoder;
@@ -77,8 +82,9 @@ public class TrackerService {
 		TrackerEntity trackerEn = new TrackerEntity();
 
 		trackerEn.setActiveTime(tracker.getActiveTime());
-		trackerEn.setTrackingDate(new Date());
+		trackerEn.setTrackingDate(new Date(System.currentTimeMillis()-24*60*60*1000));//(new Date())
 		UserEntity userEn = userRepo.findById(tracker.getUserId()).get();
+		
 		trackerEn.setUser(userEn);
 		trackerEn.setType("page_tracking");
 		if (tracker.getClaim() != null) {
@@ -91,30 +97,42 @@ public class TrackerService {
 		trackerRepo.save(trackerEn);
 	}
 	
-	public void calculateSummary(Principal principal) {
+	public SummaryEto calculateSummary(Principal principal) {
 		Optional<UserEntity> userEn=userRepo.findByName(principal.getName());
 		if(!userEn.isPresent())
-			{return;}
+			{return null;}
 		List<TrackerEntity> trackers=trackerRepo.findByUserANDType(userEn.get(), "page_tracking");
+		for (TrackerEntity trackerEntity : trackers) {
+			System.out.println(trackerEntity.getUser().getName()+" type: "+trackerEntity.getType());
+		}
 		if(trackers.isEmpty()) {
-			return;
+			return null;
 			}
 		Date yesterday=new Date(System.currentTimeMillis()-24*60*60*1000);
-		List<TrackerEntity> trackersForYesterday=trackers.stream().filter(t->t.getTrackingDate().compareTo(yesterday)==0).collect(Collectors.toList());
+		System.out.println("YESTERDAY: "+yesterday);
+		List<TrackerEntity> trackersForYesterday=trackers.stream().filter(t->t.getTrackingDate().before(new Date())).collect(Collectors.toList());
 		if(trackersForYesterday.isEmpty()) {
-			return;
+			return null;
 			}
 		Long activeTimeForyesterday=(long) trackersForYesterday.stream().
 											collect(Collectors.summarizingLong(TrackerEntity::getActiveTime))
-											.getAverage();
+											.getSum();
+		
+		System.out.println("activeTimeForyesterday: "+activeTimeForyesterday);
 		/**************************************************************************************************************************************************/
 		trackers.clear();
 		trackersForYesterday.clear();
 		trackers=trackerRepo.findByUserANDType(userEn.get(), "claim_tracking");
+		Long avgClaimProcessingTime=0L;
+		int claimsProcessed=0;
 		if(!trackers.isEmpty()) {
-			trackersForYesterday=trackers.stream().filter(t->t.getTrackingDate().compareTo(yesterday)==0).collect(Collectors.toList());
+			trackersForYesterday=trackers.stream().filter(t->t.getTrackingDate().before(new Date())).collect(Collectors.toList());
 			if(!trackersForYesterday.isEmpty()) {
-				
+				for (TrackerEntity trackerEntity : trackersForYesterday) {
+					System.out.println(trackerEntity.getActiveTime()+"   "+trackerEntity.getType());
+					avgClaimProcessingTime=avgClaimProcessingTime+trackerEntity.getActiveTime();
+				}
+				claimsProcessed=trackersForYesterday.size();
 				}
 			}
 		
@@ -124,17 +142,54 @@ public class TrackerService {
 		summEn.setUser(userEn.get());
 		summEn.setTrackingDate(yesterday);
 		summEn.setAvgActiveTime(activeTimeForyesterday);
+		summEn.setClaimsProcessed(claimsProcessed);
+		summEn.setProcessingTimePerClaim((long) (avgClaimProcessingTime/claimsProcessed));
 		
-		
+		return convertSummary(summaryRepo.save(summEn));
 		
 		}
 	
-	public void calculateRewards(Principal principal) {
+	public void calculateRewardsForYesterday(Principal principal) {
 		
-		List<TrackingSummary> summariesForyesterday=summaryRepo.findByTrackingDate(new Date(System.currentTimeMillis()-24*60*60*1000));
+		Long totalActiveTime=0L;
+		Long avgClaimProcessingTime=0L;
+		int totalClaims=0;
+		int rwrd=0;
+		Date yesterday=null;
+		Optional<UserEntity> userEn=userRepo.findByName(principal.getName());
+		if(!userEn.isPresent())
+			{return;}
+		List<TrackingSummary> summaries=summaryRepo.findByUser(userEn.get());
+		List<TrackingSummary> summariesForyesterday=summaries.stream().filter(t->t.getTrackingDate().before(new Date())).collect(Collectors.toList());
 		if(summariesForyesterday.isEmpty()) {
 			return;
 		}
+		for (TrackingSummary trackingSummary : summariesForyesterday) {
+			totalActiveTime=totalActiveTime+trackingSummary.getAvgActiveTime();
+			avgClaimProcessingTime=avgClaimProcessingTime+trackingSummary.getProcessingTimePerClaim();
+			totalClaims=totalClaims+trackingSummary.getClaimsProcessed();
+			yesterday=trackingSummary.getTrackingDate();
+		}
+		
+		if(totalActiveTime> 300L) {
+			rwrd=rwrd+2;
+			}
+	if(totalClaims>5 ) {
+		rwrd=rwrd+2;
+	}
+	if(avgClaimProcessingTime >100L) {
+		rwrd=rwrd+2;
+	}
+	
+		RewardPoints rewardEn=new RewardPoints();
+		rewardEn.setDate(yesterday);
+		rewardEn.setRewardsForDay(rwrd);
+		rewardEn.setUser(userEn.get());
+		
+		rwrdRepo.save(rewardEn);
+		
+		
+		
 		
 		
 	}

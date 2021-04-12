@@ -28,6 +28,21 @@ public class UserEntity {
 	@OneToMany(mappedBy = "user")
 	private List<TrackingSummary> summaries;
 	
+	@OneToMany(mappedBy = "user")
+	private List<RewardPoints> points;
+	
+	public List<TrackingSummary> getSummaries() {
+		return summaries;
+	}
+	public void setSummaries(List<TrackingSummary> summaries) {
+		this.summaries = summaries;
+	}
+	public List<RewardPoints> getPoints() {
+		return points;
+	}
+	public void setPoints(List<RewardPoints> points) {
+		this.points = points;
+	}
 	private Integer rewardPoints;
 	
 	public Integer getRewardPoints() {
